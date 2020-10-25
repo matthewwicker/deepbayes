@@ -11,8 +11,6 @@ deepbayes is actively under development, and location and names of packages may 
 
 `pip install deepbayes`
 
-#### Minimal Example using deepbayes
-
 ## Supported Optimizers 
 
   #### BayesByBackprop
@@ -28,6 +26,14 @@ deepbayes is actively under development, and location and names of packages may 
   #### Stochastic Gradient Descent
   Not sure what to reference you to here... a google will suffice
 
+## Supported Analysis
+
+In addition to producing posterior distributions for BNNs, deepbayes also supports some basic analysis including
+
+- Adversarial attacks for BNNs (FGSM, PGD, CW)
+- Uncertainty quantification 
+- Statistical guarentees of robustness - https://arxiv.org/pdf/1903.01980.pdf
+- Probabalistic safety estimates  - https://arxiv.org/pdf/2004.10281.pdf
 
 #### Dependancies:
 

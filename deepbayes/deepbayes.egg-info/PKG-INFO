@@ -1,0 +1,17 @@
+Metadata-Version: 2.1
+Name: deepbayes
+Version: 0.0.1
+Summary: Package for doing approximate Bayesian inference on deep neural networks [based in TF 2.0+]
+Home-page: https://github.com/deepbayes/deepbayes
+Author: Matthew Wicker
+Author-email: mattrwicker@gmail.com
+License: MIT
+Description: # deepbayes
+        Optimizers for performing approximate Bayesian inference on neural network parameters with Tensorflow and JAX
+        
+Platform: UNKNOWN
+Classifier: License :: OSI Approved :: MIT License
+Classifier: Programming Language :: Python :: 3.6
+Classifier: Programming Language :: Python :: 3.7
+Classifier: Programming Language :: Python :: 3.8
+Description-Content-Type: text/markdown

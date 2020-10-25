@@ -46,4 +46,5 @@ tensorflow, tensorflow-probability, numpy, tqdm, statsmodels,
 - [ ] Sequential Monte Carlo optimizer
 - [ ] Monte Carlo Dropout optimizer
 - [ ] Stochastic Gradient Langevin Dynamics optimizer
+- [ ] Probabilistic Backpropagation
 - [ ] Binary Bayesian neural networks

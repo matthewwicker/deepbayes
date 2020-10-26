@@ -41,10 +41,16 @@ tensorflow, tensorflow-probability, numpy, tqdm, statsmodels,
 
 ### Future Support
 
+Below we have a tentative to-do list of inference methods to impliment (7 to be exact) and other properties we want to tool to have. 
+
 - [ ] HTML documentation 
+- [ ] Non-Gaussian Posterior (requires extension of posterior representation as well)
+- [ ] Stochastic Variational Inference (SVI)
+- [ ] Probabilistic Backprop (PBP)
+- [ ] Sequential Monte Carlo optimizer (SMC)
+- [ ] Monte Carlo Dropout optimizer (MCD)
+- [ ] Stochastic Gradient Langevin Dynamics optimizer (SGLD)
+- [ ] Stochastic Gradient Markov Chain Monte Carlo (SGMCMC)
+- [ ] Riemann manifold HMC (RMHMC)
 - [ ] JAX autodif library instead of TF (deepbayes.jax.optimizers)
-- [ ] Sequential Monte Carlo optimizer
-- [ ] Monte Carlo Dropout optimizer
-- [ ] Stochastic Gradient Langevin Dynamics optimizer
-- [ ] Probabilistic Backpropagation
 - [ ] Binary Bayesian neural networks

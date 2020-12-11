@@ -6,3 +6,4 @@ from .sgd import StochasticGradientDescent
 from .swag import StochasticWeightAveragingGaussian
 from .hmc import HamiltonianMonteCarlo
 from .adam import Adam
+from .lmc import LangevinMonteCarlo

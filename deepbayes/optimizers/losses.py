@@ -47,6 +47,11 @@ def KL_Loss(labels, predictions, weight, prior_mean, prior_var, q_mean, q_var, l
     data_likli = tf.cast(data_likli, 'float32')
     return data_likli + (kl_weight*(posti_likli-prior_likli)), posti_likli-prior_likli
 
+def LangevinDynLoss(labels, predictions, loss_func, weight, prior_mean, prior_var, temp_scale=1.0):
+    data_likli = loss_func(labels, predictions)
+    data_likli = tf.cast(data_likli, 'float32')
+    prior_likli = log_q(weight, prior_mean, prior_var)
+    return data_likli #+ temp_scale * prior_likli
 
 def crossentropy_loss(target, output):
     _EPSILON = 0.00001

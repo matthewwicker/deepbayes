@@ -12,7 +12,7 @@ X_train = X_train.astype("float32").reshape(-1, 28*28)
 X_test = X_test.astype("float32").reshape(-1, 28* 28)
 
 
-opt = optimizers.VariationalOnlineGuassNewton()
+opt = optimizers.LangevinMonteCarlo()
 
 likelihood = tf.keras.losses.SparseCategoricalCrossentropy()
 

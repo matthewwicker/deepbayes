@@ -11,7 +11,7 @@ README = (HERE / "README.md").read_text()
 # This call to setup() does all the work
 setup(
     name="deepbayes",
-    version="0.0.1",
+    version="0.0.2",
     description="Package for doing approximate Bayesian inference on deep neural networks [based in TF 2.0+]",
     long_description=README,
     long_description_content_type="text/markdown",

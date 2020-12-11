@@ -1,6 +1,6 @@
 Metadata-Version: 2.1
 Name: deepbayes
-Version: 0.0.1
+Version: 0.0.2
 Summary: Package for doing approximate Bayesian inference on deep neural networks [based in TF 2.0+]
 Home-page: https://github.com/deepbayes/deepbayes
 Author: Matthew Wicker

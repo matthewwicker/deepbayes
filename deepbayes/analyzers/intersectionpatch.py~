@@ -1,0 +1,378 @@
+from statsmodels.stats.proportion import proportion_confint
+import math
+import numpy as np
+import tensorflow as tf
+from tqdm import trange
+from . import attacks
+import copy 
+
+def propagate_conv2d(W, b, x_l, x_u, marg=0, b_marg=0):
+    w_pos = tf.maximum(W+marg, 0)
+    w_neg = tf.minimum(W-marg, 0)
+    h_l = (tf.nn.convolution(x_l, w_pos) +
+          tf.nn.convolution(x_u, w_neg))
+    h_u = (tf.nn.convolution(x_u, w_pos) +
+          tf.nn.convolution(x_l, w_neg))
+    nom = tf.nn.convolution((x_l+x_u)/2, W)
+    h_l = nom + h_l + (b - b_marg)
+    h_u = nom + h_u + (b + b_marg)
+    return h_l, h_u
+
+
+def propagate_interval(W, b, x_l, x_u, marg=0, b_marg=0):
+    #marg = tf.divide(marg, 2)
+    #b_marg = tf.divide(marg, 2)
+    x_mu = tf.cast(tf.divide(tf.math.add(x_u, x_l), 2), dtype=tf.float64)
+    x_r =  tf.cast(tf.divide(tf.math.subtract(x_u, x_l), 2), dtype=tf.float64)
+    W_mu = tf.cast(W, dtype=tf.float64)
+    W_r =  tf.cast(marg, dtype=tf.float64)
+    if(type(marg) == int):
+        W_r = 0.0 * W_mu
+    b_u =  tf.cast(b + b_marg, dtype=tf.float64)
+    b_l =  tf.cast(b - b_marg, dtype=tf.float64)
+    #h_mu = tf.math.add(tf.matmul(x_mu, W_mu), b_mu)
+    h_mu = tf.matmul(x_mu, W_mu)
+    x_rad = tf.matmul(x_r, tf.math.abs(W_mu))
+    W_rad = tf.matmul(tf.abs(x_mu), W_r)
+    Quad = tf.matmul(tf.abs(x_r), tf.abs(W_r))
+    h_u = tf.add(tf.add(tf.add(tf.add(h_mu, x_rad), W_rad), Quad), b_u)
+    h_l = tf.add(tf.subtract(tf.subtract(tf.subtract(h_mu, x_rad), W_rad), Quad), b_l)
+    return h_l, h_u
+
+
+def propagate_interval_exact(W, b, x_l, x_u, marg=0, b_marg=0):
+    """
+    Function which does matrix multiplication but with weight and
+    input intervals.
+    """
+    x_l = tf.cast(x_l, dtype=tf.float32);x_u = tf.cast(x_u, dtype=tf.float32)
+    W = tf.cast(W, dtype=tf.float32); b = tf.cast(b, dtype=tf.float32)
+    marg = tf.cast(marg, dtype=tf.float32); b_marg = tf.cast(b_marg, dtype=tf.float32)
+    x_l = tf.squeeze(x_l); x_u = tf.squeeze(x_u)
+    W_l, W_u = W-marg, W+marg           #Use eps as small symetric difference about the mean
+    b_l, b_u = b-b_marg, b+b_marg       #Use eps as small symetric difference about the mean
+    h_max = np.zeros(len(W[0]))         #Placeholder variable for return value
+    h_min = np.zeros(len(W[0]))         #Placeholder variable for return value
+    for i in range(len(W)):             #This is literally just a step-by-step matrix multiplication
+        for j in range(len(W[0])):      # where we are taking the min and max of the possibilities
+            out_arr = [W_l[i][j]*x_l[i], W_l[i][j]*x_u[i],
+                       W_u[i][j]*x_l[i], W_u[i][j]*x_u[i]]
+            h_min[j] += min(out_arr)
+            h_max[j] += max(out_arr)
+    h_min = h_min + b_l
+    h_max = h_max + b_u
+    return h_min, h_max         #Return the min and max of the intervals.
+                                #(dont forget to apply activation function after)
+
+def IBP(model, s0, s1, weights, weight_margin=0, logits=True):
+    h_l = s0
+    h_u = s1
+    layers = model.model.layers
+    offset = 0
+    for i in range(len(layers)):
+        if(len(layers[i].get_weights()) == 0):
+            h_u = model.model.layers[i](h_u)
+            h_l = model.model.layers[i](h_l)
+            offset += 1
+            continue
+        w, b = weights[2*(i-offset)], weights[(2*(i-offset))+1]
+        sigma = model.posterior_var[2*(i-offset)]
+        b_sigma = model.posterior_var[2*(i-offset)+1]
+        marg = weight_margin*sigma
+        b_marg = weight_margin*b_sigma
+        if(len(w.shape) == 2):
+            h_l, h_u = propagate_interval(w, b, h_l, h_u, marg=marg, b_marg=b_marg)
+            activate = True
+        elif(len(w.shape) == 4):
+            h_l, h_u = propagate_conv2d(w, b, h_l, h_u, marg=marg, b_marg=b_marg)
+            activate = True
+        #h_l, h_u = propagate_interval(w, b, h_l, h_u, marg=marg, b_marg=b_marg)
+        if(i < len(layers)-1):
+            h_l = model.model.layers[i].activation(h_l)
+            h_u = model.model.layers[i].activation(h_u)
+    return h_l, h_u
+
+# ============
+
+# Computing with intersections
+
+# ============
+
+"""
+Given a set intervals, compute the probability of a random
+sample from a guassian falling in these intervals. (Taken from lemma)
+of the document
+"""
+import math
+from scipy.special import erf
+def compute_erf_prob(intervals, mean, var):
+    prob = 0.0
+    for interval in intervals:
+        val1 = erf((mean-interval[0])/(math.sqrt(2)*(var)))
+        val2 = erf((mean-interval[1])/(math.sqrt(2)*(var)))
+#        val1 = erf((mean-interval[0])/(math.sqrt(2*(var))))
+#        val2 = erf((mean-interval[1])/(math.sqrt(2*(var))))
+        prob += 0.5*(val1-val2)
+    return prob
+
+
+
+def intersect_intervals(wi_a, wi_b, margin, var):
+    intersection = []
+    for l in range(len(wi_a)):
+        wi_a_u = (wi_a[l] + (var[l]*margin)).numpy() # Upper bound for these variables
+        wi_a_l = (wi_a[l] - (var[l]*margin)).numpy() # Lower bound for these variables
+        wi_b_u = (wi_b[l] + (var[l]*margin)).numpy() # Upper bound for these variables
+        wi_b_l = (wi_b[l] - (var[l]*margin)).numpy() # Lower bound for these variables
+
+        #if((wi_a_u > wi_b_l).any() or (wi_b_u > wi_a_l).any() or ((wi_a_l < wi_b_l).any() and (wi_a_u > wi_b_u).any()) or ((wi_b_l < wi_a_l).any() and (wi_b_u > wi_a_u).any())):
+        #    print("INTERSECTION!")
+        intersect_l = np.maximum(wi_a_l, wi_b_l)
+        intersect_u = np.minimum(wi_a_u, wi_b_u)
+        #print(intersect_l.shape, intersect_u.shape)
+        #if((intersect_u - intersect_l).max() > 0):
+        nonint = np.argwhere((intersect_u - intersect_l) <= 0)
+        intersect_l[(intersect_u - intersect_l) <= 0] = 0
+        intersect_u[(intersect_u - intersect_l) <= 0] = 0
+        intersection.append(np.array(zip(intersect_l,intersect_u)))
+        #else:
+        #    return -1
+        #intersect_l = np.maximum(wi_a_l, wi_b_l)
+        #intersect_u = np.minimum(wi_a_u, wi_b_u)
+        #intersection_test = (intersect_l - intersect_u < 0).any()
+        #intersection_test = (intersect_u - intersect_l > 0).any()
+        #if(intersection_test == False):
+        #    return -1
+        #else:
+        #    intersection.append(np.array(zip(intersect_l,intersect_u)))
+        #return np.array(zip(intersect_l,intersect_u))
+    return intersection
+
+"""
+This is an interative approach to intersection that I know is correct
+and is written out to help me optimize a faster algorithm
+"""
+def intersect_intervals_slow(wi_a, wi_b, margin, var):
+    intersection_interval = []
+    scaled_marg = margin*var
+    for l in range(len(wi_a)): # This iterates 2x the number of layers
+        shape = np.shape(wi_a[l]); shape=list(shape); shape.append(2)
+        vector_interval = np.zeros(shape)
+        #vector_interval = np.expand_dims(vector_interval, axis=-1)
+        if(l%2==0): # We know this is a weight vector for a layer
+            for i in range(len(wi_a[l])):
+                for j in range(len(wi_a[l][i])):
+                    wi_a_u = wi_a[l][i][j]+scaled_marg[l][i][j] # Upper bound for this variable
+                    wi_a_l = wi_a[l][i][j]-scaled_marg[l][i][j] # Lower bound for this variable
+                    wi_b_u = wi_b[l][i][j]+scaled_marg[l][i][j] # Upper bound for this variable
+                    wi_b_l = wi_b[l][i][j]-scaled_marg[l][i][j] # Lower bound for this variable
+                    # If any of these conditions are satisfied then we have a non-null intersection
+                    if(wi_a_u > wi_b_l or wi_b_u > wi_a_l or (wi_a_l < wi_b_l and wi_a_u > wi_b_u) or (wi_b_l < wi_a_l and wi_b_u > wi_a_u)):
+                        # In any case, this is the intersection
+                        vector_interval[i][j] = [max(wi_a_l, wi_b_l), min(wi_a_u, wi_b_u)]
+                    else:
+                        # If for even one random variable the intervals dont intersect than the whole thing doesnt intersect
+                        return -1
+            intersection_interval.append(vector_interval)
+        else: # We know this is a bias vector for a layer
+            for i in range(len(wi_a[l])):
+                wi_a_u = wi_a[l][i]+scaled_marg[l][i] # Upper bound for this variable
+                wi_a_l = wi_a[l][i]-scaled_marg[l][i] # Lower bound for this variable
+                wi_b_u = wi_b[l][i]+scaled_marg[l][i] # Upper bound for this variable
+                wi_b_l = wi_b[l][i]-scaled_marg[l][i] # Lower bound for this variable
+                # If any of these conditions are satisfied then we have a non-null intersection
+                if(wi_a_u > wi_b_l or wi_b_u > wi_a_l or (wi_a_l < wi_b_l and wi_a_u > wi_b_u) or (wi_b_l < wi_a_l and wi_b_u > wi_a_u)):
+                    # In any case, this is the intersection
+                    vector_interval[i] = [max(wi_a_l, wi_b_l), min(wi_a_u, wi_b_u)]
+                else:
+                    return -1
+            intersection_interval.append(vector_interval)
+    print("found a full intersection")
+    return intersection_interval
+
+
+def compute_interval_probs_weight_std(arg):
+    vector_intervals, marg, mean, var = arg
+    means = mean; # vars = var
+    prob_vec = np.zeros(vector_intervals[0].shape)
+    for i in trange(len(vector_intervals[0])):
+        for j in range(len(vector_intervals[0][0])):
+            intervals = []
+            p = 0.0
+            for num_found in range(len(vector_intervals)):
+                interval = [vector_intervals[num_found][i][j]-(var[i][j]*marg), vector_intervals[num_found][i][j]+(var[i][j]*marg)]
+                interval = [interval]
+                p += compute_erf_prob(interval, means[i][j], var[i][j])
+            prob_vec[i][j] = p
+    return np.asarray(prob_vec) # what is being returned here is the sum of the cumulative density for each entry in the weight vector
+
+def compute_interval_probs_weight_int(arg):
+    vector_intervals, marg, mean, var = arg
+    means = mean; # vars = var
+    prob_vec = np.zeros(vector_intervals[0].shape)
+    #v_l, v_u = (*vector_intervals)
+    print(vector_intervals.shape)
+    #print(v_l.shape)
+    for i in trange(len(vector_intervals[0])):
+        for j in range(len(vector_intervals[0][0])):
+            intervals = []
+            p = 0.0
+            for num_found in range(len(vector_intervals)):
+                interval = [vector_intervals[num_found][i][j]-(var[i][j]*marg), vector_intervals[num_found][i][j]+(var[i][j]*marg)]
+                interval = [interval]
+                p += compute_erf_prob(interval, means[i][j], var[i][j])
+            prob_vec[i][j] = p
+    return np.asarray(prob_vec) # what is being returned here is the sum of the cumulative density for each entry in the weight vector
+
+
+def compute_interval_probs_bias_std(arg):
+    vector_intervals, marg, mean, var = arg
+    means = mean; #stds = var
+    #print("Hello")
+    prob_vec = np.zeros(vector_intervals[0].shape)
+    for i in trange(len(vector_intervals[0])):
+        intervals = []
+        p = 0.0
+        for num_found in range(len(vector_intervals)):
+            interval = [vector_intervals[num_found][i]-(var[i]*marg), vector_intervals[num_found][i]+(var[i]*marg)]
+            interval = [interval]
+            #intervals.append(interval)
+            p += compute_erf_prob(interval, means[i], var[i])
+        prob_vec[i] = p
+    return np.asarray(prob_vec)
+
+def compute_interval_probs_bias_int(arg):
+    vector_intervals, marg, mean, var = arg
+    means = mean; #stds = var
+    #print("Hello")
+    #v_l, v_u  = (*vector_intervals)
+    prob_vec = np.zeros(vector_intervals[0].shape)
+    print(vector_intervals.shape)
+    #print(v_l.shape)
+    for i in trange(len(vector_intervals[0])):
+        intervals = []
+        p = 0.0
+        for num_found in range(len(vector_intervals)):
+            interval = [vector_intervals[num_found][i]-(var[i]*marg), vector_intervals[num_found][i]+(var[i]*marg)]
+            interval = [interval]
+            #intervals.append(interval)
+            p += compute_erf_prob(interval, means[i], var[i])
+        prob_vec[i] = p
+    return np.asarray(prob_vec)
+
+
+def compute_probability_subroutine(model, weight_intervals, margin, verbose=True, n_proc=40, correction=False):
+    if(verbose == True):
+        func = trange
+    else:
+        func = range
+
+    # compute the probability of weight intervals
+    dimensionwise_intervals = weight_intervals #np.swapaxes(np.asarray(weight_intervals),1,0)
+    args_bias = []
+    args_weights = []
+    #probs = []
+    #full_p = 1
+    for i in func(len(model.posterior_mean), desc="Comping in serial"):
+        if(i % 2 == 0): # then its a weight vector
+            if(correction):
+                print("UNIMPLIMENTED CORRECTION STEP"); sys.exit(-1)
+                args_weights.append((dimensionwise_intervals[i], margin, model.posterior_mean[i], np.asarray(model.posterior_var[i])))
+            else:
+                args_weights.append((dimensionwise_intervals[i], margin, model.posterior_mean[i], np.asarray(model.posterior_var[i])))
+            #p = compute_interval_probs_weight_int((dimensionwise_intervals[i], margin, model.posterior_mean[i], np.asarray(model.posterior_var[i])))
+            #full_p *= np.prod(p)
+        else: # else it is a bias vector
+            if(correction):
+                args_bias.append((dimensionwise_intervals[i], margin, model.posterior_mean[i], np.asarray(model.posterior_var[i])))
+            else:
+                args_bias.append((dimensionwise_intervals[i], margin, model.posterior_mean[i], np.asarray(model.posterior_var[i])))
+            #p = compute_interval_probs_bias_int((dimensionwise_intervals[i], margin, model.posterior_mean[i], np.asarray(model.posterior_var[i])))
+            #full_p *= np.prod(p)
+        #probs.append(p)
+#    return full_p
+    print(len(args_bias))
+    from multiprocessing import Pool
+    print("Computing for bias")
+    proc_pool = Pool(n_proc)
+    if(correction):
+        ps_bias = proc_pool.map(compute_interval_probs_bias_int, args_bias)
+    else:
+        ps_bias = proc_pool.map(compute_interval_probs_bias_std, args_bias)
+    proc_pool.close()
+    proc_pool.join()
+
+
+    print("Computing for weight")
+    proc_pool = Pool(n_proc)
+    if(correction):
+        ps_weight = proc_pool.map(compute_interval_probs_weight_int, args_weights)
+    else:
+        ps_weight = proc_pool.map(compute_interval_probs_weight_std, args_weights)
+    proc_pool.close()
+    proc_pool.join()
+
+    import itertools
+    ps_bias = np.concatenate(ps_bias).ravel()
+    ps_weight = np.asarray(list(itertools.chain(*(itertools.chain(*ps_weight)))))
+    full_p = 1
+    full_p *= np.prod(ps_bias)
+    full_p *= np.prod(ps_weight)
+    #full_p = 1
+    #probs = np.asarray(probs).flatten()
+    #print(probs.shape)
+    #full_p = np.prod(probs)
+    return full_p
+
+
+def compute_probability(model, weight_intervals, margin, verbose=True, n_proc=30):
+    intersections = []
+    print("About to compute intersection for this many intervals: ", len(weight_intervals))
+    for wi in trange(len(weight_intervals), desc="Computing intersection weights"):
+        for wj in range(wi+1, len(weight_intervals)):
+            #if(wi == wj):
+            #    continue
+            result = intersect_intervals(weight_intervals[wi], weight_intervals[wj], margin, model.posterior_var)
+            if(type(result) == int):
+                continue
+            else:
+                intersections.append(result)
+    print("We found this many intersections: ", len(intersections))
+
+    # compute the probability of intersections
+    overapprox = compute_probability_subroutine(model, np.swapaxes(np.asarray(weight_intervals),1,0), margin, verbose, n_proc)
+    #overapprox = compute_probability_subroutine(model, np.asarray(weight_intervals), margin, verbose, n_proc)
+    print("Overapproximation: ", overapprox)
+    # return the subtraction of the two
+    print(np.shape(intersections))
+    if(len(intersections) != 0):
+        print(intersections.shape)
+        correction = compute_probability_subroutine(model, np.swapaxes(np.asarray(intersections),1,0), 0.0, verbose, n_proc, correction=True)
+    else:
+        correction = 0.0
+    print("Correction: ", correction)
+    print("Result: ", overapprox - correction)
+    return overapprox - correction
+
+
+
+# ============
+# Full routine
+# ============
+def prob_veri_intersection(model, s0, s1, w_marg, samples, predicate, i0=0, inflate=1.0):
+    w_marg = w_marg**2
+    safe_weights = []
+    #safe_outputs = []
+    for i in trange(samples, desc="Checking Samples"):
+        model.model.set_weights(model.sample(inflate=inflate))
+        ol, ou = IBP(model, s0, s1, model.model.get_weights(), w_marg)
+        if(predicate(np.squeeze(s0), np.squeeze(s1), np.squeeze(ol), np.squeeze(ou))):
+            safe_weights.append(model.model.get_weights())
+            #ol = np.squeeze(ol); ou = np.squeeze(ou)
+    print("Found %s safe intervals"%(len(safe_weights)))
+    if(len(safe_weights) < 2):
+        return 0.0, -1
+    p = compute_probability(model, safe_weights, w_marg)
+    return p #, np.squeeze(safe_outputs)
+
+

@@ -143,8 +143,9 @@ class HamiltonianMonteCarlo(optimizer.Optimizer):
                 predictions = self.model(features)
                 logit_l, logit_u = analyzers.IBP(self, features, self.model.trainable_variables, eps=self.epsilon)
                 #!*! TODO: Undo the hardcoding of depth in this function
-                v1 = tf.one_hot(labels, depth=10)
-                v2 = 1 - tf.one_hot(labels, depth=10)
+                v1 = tf.one_hot(labels, depth=self.classes); v1 = tf.cast(v1, dtype=tf.float32)
+                v2 = 1 - tf.one_hot(labels, depth=self.classes); v2 = tf.cast(v2, dtype=tf.float32)
+                logit_l, logit_u = tf.cast(logit_l, dtype=tf.float32), tf.cast(logit_u, dtype=tf.float32) 
                 worst_case = tf.math.add(tf.math.multiply(v2, logit_u), tf.math.multiply(v1, logit_l))
                 # Now we have the worst case softmax probabilities
                 worst_case = self.model.layers[-1].activation(worst_case)

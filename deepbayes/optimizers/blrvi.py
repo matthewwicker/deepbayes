@@ -52,7 +52,7 @@ class VariationalOnlineGuassNewton(optimizer.Optimizer):
         beta_2 = self.beta_2
         lam = self.lam
 
-        N = 60000 #float(self.batch_size) # batch size
+        N = self.N #60000 #float(self.batch_size) # batch size
 
         self.posterior_mean = self.model.get_weights()
 
@@ -75,10 +75,25 @@ class VariationalOnlineGuassNewton(optimizer.Optimizer):
                 loss = self.loss_func(labels, predictions)
 
             elif(int(self.robust_train) == 1):
-                logit_l, logit_u = analyzers.IBP(self, features, self.model.trainable_variables, eps=self.epsilon)
-                v1 = tf.one_hot(labels, depth=10)
-                v2 = 1 - tf.one_hot(labels, depth=10)
-                worst_case = tf.math.add(tf.math.multiply(v2, logit_u), tf.math.multiply(v1, logit_l))
+                try:
+                    logit_l, logit_u = analyzers.IBP(self, features, self.model.trainable_variables, eps=self.epsilon)
+                    v1 = tf.one_hot(labels, depth=self.classes); v1 = tf.cast(v1, dtype=tf.float32)
+                    v2 = 1 - tf.one_hot(labels, depth=self.classes); v2 = tf.cast(v2, dtype=tf.float32)
+                    logit_l, logit_u = tf.cast(logit_l, dtype=tf.float32), tf.cast(logit_u, dtype=tf.float32) 
+                    worst_case = tf.math.add(tf.math.multiply(v2, logit_u), tf.math.multiply(v1, logit_l))
+                except:
+                    logit_l, logit_u = analyzers.IBP(self, features, self.model.trainable_variables, eps=self.epsilon)
+                    #logit_l, logit_u = analyzers.IBP(model, inp, model.model.get_weights(), eps, predict=True)
+                    logit_l, logit_u = tf.cast(logit_l, dtype=tf.float32), tf.cast(logit_u, dtype=tf.float32) 
+                    diff_above = logit_u - labels
+                    diff_below = logit_l - labels
+                    logit_l = np.asarray(logit_l)
+                    logit_u = np.asarray(logit_u)
+                    zeros = 0.0* logit_l
+                    zeros[np.abs(diff_above) > np.abs(diff_below)] = logit_u[np.abs(diff_above) > np.abs(diff_below)]
+                    zeros[np.abs(diff_above) <= np.abs(diff_below)] = logit_l[np.abs(diff_above) <= np.abs(diff_below)]
+                    worst_case = zeros
+
                 worst_case = self.model.layers[-1].activation(worst_case)
                 output = (self.robust_lambda * predictions) + ((1-self.robust_lambda) * worst_case)
                 loss =  self.loss_func(labels, output)
@@ -156,7 +171,8 @@ class VariationalOnlineGuassNewton(optimizer.Optimizer):
     def save(self, path):
         save_var = []
         for i in range(len(self.posterior_var)):
-            var = tf.math.reciprocal(tf.math.sqrt(self.N*self.posterior_var[i]))
+            #var = tf.math.reciprocal(tf.math.sqrt(self.N*self.posterior_var[i]))
+            var = tf.math.reciprocal(self.N*self.posterior_var[i])
             save_var.append(var)
         temp_var = copy.deepcopy(self.posterior_var)
         self.posterior_var = save_var

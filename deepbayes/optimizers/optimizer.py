@@ -11,6 +11,7 @@ from abc import ABC, abstractmethod
 import os
 import copy
 import math
+import pickle
 import logging
 import numpy as np
 import tensorflow as tf
@@ -31,6 +32,9 @@ class Optimizer(ABC):
     @abstractmethod
     def compile(self, keras_model, loss_fn, batch_size, learning_rate, decay,
                       epochs, prior_mean, prior_var, **kwargs):
+        
+        self.mode = kwargs.get('mode', 'classification')
+        self.classes = kwargs.get('classes', 10)
         self.model = keras_model
         self.batch_size = batch_size
         self.learning_rate = learning_rate
@@ -52,24 +56,40 @@ class Optimizer(ABC):
         self.train_loss = tf.keras.metrics.Mean(name="train_loss")
         self.valid_loss = tf.keras.metrics.Mean(name="valid_loss")
 
-        # Right now I only have one accessory metric. Will come back and add 
+        # Right now I only have one accessory metric. Will come back and variably
         # many later. 
-        self.train_metric = kwargs.get('metric', tf.keras.metrics.SparseCategoricalAccuracy(name="train_acc"))
-        self.valid_metric = kwargs.get('metric', tf.keras.metrics.SparseCategoricalAccuracy(name="valid_acc"))
-        self.extra_metric = kwargs.get('metric', tf.keras.metrics.SparseCategoricalAccuracy(name="extra_acc"))
+        if(self.mode == 'classification'):
+            self.train_metric = kwargs.get('metric', tf.keras.metrics.SparseCategoricalAccuracy(name="train_acc"))
+            self.valid_metric = kwargs.get('metric', tf.keras.metrics.SparseCategoricalAccuracy(name="valid_acc"))
+            self.extra_metric = kwargs.get('metric', tf.keras.metrics.SparseCategoricalAccuracy(name="extra_acc"))
+
+        if(self.mode == 'regression'):
+            self.train_metric = kwargs.get('metric', tf.keras.metrics.RootMeanSquaredError(name="train_mse"))
+            self.valid_metric = kwargs.get('metric', tf.keras.metrics.RootMeanSquaredError(name="valid_mse"))
+            self.extra_metric = kwargs.get('metric', tf.keras.metrics.RootMeanSquaredError(name="extra_mse"))
+
 
         self.robust_train = kwargs.get('robust_train', 0)
         if(self.robust_train != 0):
-            print("BayesKeras: Detected robust training at compilation. Please ensure you have selected a robust-compatible loss")
-            self.epochs += 1
+            print("deepbayes: Detected robust training at compilation. Please ensure you have selected a robust-compatible loss")
         self.epsilon = kwargs.get('epsilon', 0.1) 
         self.robust_lambda = kwargs.get('rob_lam', 0.5)
         self.robust_linear = kwargs.get('linear_schedule', True)        
+        if(self.robust_linear):
+            self.epochs += 1
 
-        self.attack_loss = tf.keras.losses.SparseCategoricalCrossentropy()
+        # incase one wants to attack with something that is not the training loss function
+        self.attack_loss = kwargs.get('attack_loss', tf.keras.losses.SparseCategoricalCrossentropy())
 
+        # For monte-carlo integration over robust loss
         self.loss_monte_carlo = kwargs.get('loss_mc', 2)
-        self.eps_dist = tfp.distributions.Exponential(rate = 1.0/float(self.epsilon))
+        try:
+            self.eps_dist = tfp.distributions.Exponential(rate = 1.0/float(self.epsilon))
+        except:
+            self.eps_dist = None
+        # Add some data-dependant bounds (lower and upper bounds per feature dimension)
+        self.input_upper = math.inf
+        self.input_lower = -math.inf
 
         self.acc_log = []
         self.rob_log = []
@@ -121,28 +141,27 @@ class Optimizer(ABC):
         if(self.robust_train == 1): # We only check with IBP if we need to 
             logit_l, logit_u = analyzers.IBP(self, features, self.model.get_weights(), self.epsilon)
             #logit_l, logit_u = analyzers.IBP(self, features, self.model.trainable_variables, 0.0)
-            v1 = tf.one_hot(labels, depth=10)
-            v2 = 1 - tf.one_hot(labels, depth=10)
-            worst_case = tf.math.add(tf.math.multiply(v2, logit_u), tf.math.multiply(v1, logit_l))
-            worst_case = self.model.layers[-1].activation(worst_case)
-            v_loss = self.loss_func(labels, predictions, worst_case, self.robust_lambda)
+            try:
+                v1 = tf.one_hot(labels, depth=self.classes); v1 = tf.cast(v1, dtype=tf.float32)
+                v2 = 1 - tf.one_hot(labels, depth=self.classes); v2 = tf.cast(v2, dtype=tf.float32)
+                logit_l, logit_u = tf.cast(logit_l, dtype=tf.float32), tf.cast(logit_u, dtype=tf.float32) 
+                worst_case = tf.math.add(tf.math.multiply(v2, logit_u), tf.math.multiply(v1, logit_l))
+                worst_case = self.model.layers[-1].activation(worst_case)
+            except:
+                logit_l, logit_u = tf.cast(logit_l, dtype=tf.float32), tf.cast(logit_u, dtype=tf.float32) 
+                diff_above = logit_u - labels
+                diff_below = logit_l - labels
+                logit_l = np.asarray(logit_l)
+                logit_u = np.asarray(logit_u)
+                zeros = 0.0* logit_l
+                zeros[np.abs(diff_above) > np.abs(diff_below)] = logit_u[np.abs(diff_above) > np.abs(diff_below)]
+                zeros[np.abs(diff_above) <= np.abs(diff_below)] = logit_l[np.abs(diff_above) <= np.abs(diff_below)]
+                worst_case = zeros
+            v_loss = self.loss_func(labels, predictions)
             self.extra_metric(labels, worst_case)
         elif(self.robust_train == 2):
-            v_loss = self.loss_func(labels, predictions, predictions, self.robust_lambda)
+            v_loss = self.loss_func(labels, predictions)
             worst_case = predictions
-        elif(self.robust_train == 3 or self.robust_train == 5): # We only check with IBP if we need to 
-            logit_l, logit_u = analyzers.IBP(self, features, self.model.get_weights(), self.epsilon)
-            #logit_l, logit_u = analyzers.IBP(self, features, self.model.trainable_variables, 0.0)
-            #print(logit_l.shape)
-            v1 = tf.squeeze(tf.one_hot(labels, depth=10))
-            v2 = tf.squeeze(1 - tf.one_hot(labels, depth=10))
-            #print(v1.shape, v2.shape)
-            worst_case = tf.math.add(tf.math.multiply(v2, logit_u), tf.math.multiply(v1, logit_l))
-            #print(worst_case.shape)
-            worst_case = self.model.layers[-1].activation(worst_case)
-            #print(worst_case.shape)
-            v_loss = self.loss_func(labels, worst_case)
-            self.extra_metric(labels, worst_case)
         else:
             v_loss = self.loss_func(labels, predictions)
             worst_case = predictions
@@ -152,8 +171,13 @@ class Optimizer(ABC):
 
     def logging(self, loss, acc, val_loss, val_acc, epoch):
         # Local logging
+        if(self.mode == 'regression'):
+            tag = 'mse'
+            tag = 'err'
+        else:
+            tag = 'acc'
         if(self.robust_train == 0):
-            template = "Epoch {}, loss: {:.3f}, acc: {:.3f}, val_loss: {:.3f}, val_acc: {:.3f}" 
+            template = "Epoch {}, loss: {:.3f}, %s: {:.3f}, val_loss: {:.3f}, val_%s: {:.3f}"%(tag, tag)
             print (template.format(epoch+1, loss,
                          acc,
                          val_loss,
@@ -178,7 +202,7 @@ class Optimizer(ABC):
         return sampled_weights
 
     def _gen_implicit_prior(self):
-        print("BayesKeras: Using implicit prior")
+        print("deepbayes: Using implicit prior")
         prior_mean = []
         prior_var = []
         for i in range(len(self.model.layers)):
@@ -237,6 +261,15 @@ class Optimizer(ABC):
             os.makedirs(path)
         np.save(path+"/mean", np.asarray(self.posterior_mean))
         np.save(path+"/var", np.asarray(self.posterior_var))
+
+        self.info = {}
+        for k, v in self.__dict__.items():
+            if(type(v) == int or type(v) == float):
+                print((k,v))
+                self.info[k] = v
+        with open(path + '/info.pkl', 'wb') as f:
+            pickle.dump(self.info, f, pickle.HIGHEST_PROTOCOL)
+
         self.model.save(path+'/model.h5')
         model_json = self.model.to_json()
         with open(path+"/arch.json", "w") as json_file:

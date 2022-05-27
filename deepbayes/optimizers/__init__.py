@@ -4,6 +4,7 @@ from .noisyadam import NoisyAdam
 from .blrvi import VariationalOnlineGuassNewton
 from .sgd import StochasticGradientDescent
 from .swag import StochasticWeightAveragingGaussian
-from .hmc import HamiltonianMonteCarlo
 from .adam import Adam
-from .lmc import LangevinMonteCarlo
+from .hmc import HamiltonianMonteCarlo
+from .sghmc import SGHamiltonianMonteCarlo
+from .sghmc import SGHamiltonianMonteCarlo as SGHMC

@@ -10,6 +10,8 @@ deepbayes.egg-info/top_level.txt
 deepbayes/analyzers/__init__.py
 deepbayes/analyzers/attacks.py
 deepbayes/analyzers/bpda.py
+deepbayes/analyzers/intersectionpatch.py
+deepbayes/analyzers/probverification.py
 deepbayes/analyzers/uncertainty.py
 deepbayes/analyzers/verifiers.py
 deepbayes/optimizers/__init__.py
@@ -21,5 +23,5 @@ deepbayes/optimizers/losses.py
 deepbayes/optimizers/noisyadam.py
 deepbayes/optimizers/optimizer.py
 deepbayes/optimizers/sgd.py
+deepbayes/optimizers/sghmc.py
 deepbayes/optimizers/swag.py
-deepbayes/optimizers/vogn1.py

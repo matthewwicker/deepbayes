@@ -112,7 +112,7 @@ class HamiltonianMonteCarlo(optimizer.Optimizer):
         if(random.uniform(0,1) < met_const):
             print("ACCEPTED")
             self.num_rets.append(1); self.iterate += 1
-            self.posterior_samples.append(self.q) 
+            self.posterior_samples.append(copy.deepcopy(self.q)) 
             self.current_q = self.q
             self.current_p = self.p
             self.current_U = self.proposed_U

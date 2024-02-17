@@ -544,7 +544,7 @@ def chernoff_bound_verification(model, inp, eps, cls, **kwargs):
     chernoff_bound = math.ceil( (1/(2*epsilon**2)) * math.log(2/delta) )
     softmax = 0
     for i in trange(chernoff_bound, desc="Sampling for Chernoff Bound Satisfaction"):
-        model.set_weights(model.sample())
+        model.model.set_weights(model.sample())
         logit_l, logit_u = IBP(model, inp, model.model.get_weights(), eps, predict=False)
         v1 = tf.one_hot(cls, depth=10)
         v2 = 1 - tf.one_hot(cls, depth=10)

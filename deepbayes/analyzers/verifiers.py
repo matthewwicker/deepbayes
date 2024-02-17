@@ -588,7 +588,7 @@ def massart_bound_check(model, inp, eps, predicate, **kwargs):
     while(iterations <= halting_bound):
         if(iterations > 0 and verbose):
             print("Working on iteration: %s \t Bound: %s \t Param: %s"%(iterations, halting_bound, successes/iterations))  
-        model.set_weights(model.sample())
+        model.model.set_weights(model.sample())
         #print("PREDICTION: ", model._predict(inp))
         if(verify and classification):
             logit_l, logit_u = IBP(model, inp, model.model.get_weights(), eps, predict=False)

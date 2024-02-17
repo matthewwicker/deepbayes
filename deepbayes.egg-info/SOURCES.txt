@@ -18,6 +18,7 @@ deepbayes/optimizers/__init__.py
 deepbayes/optimizers/adam.py
 deepbayes/optimizers/bayesbybackprop.py
 deepbayes/optimizers/blrvi.py
+deepbayes/optimizers/deepensemble.py
 deepbayes/optimizers/hmc.py
 deepbayes/optimizers/losses.py
 deepbayes/optimizers/noisyadam.py

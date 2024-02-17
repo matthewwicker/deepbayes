@@ -122,7 +122,7 @@ class NoisyAdam(optimizer.Optimizer):
                 loss = self.loss_func(labels, output)
 
         weight_gradient = tape.gradient(loss, self.model.trainable_variables)
-        g = np.asarray(weight_gradient)
+        g = np.asarray(weight_gradient, dtype=object)
 
         sq_grad = []
         for i in range(len(weight_gradient)):

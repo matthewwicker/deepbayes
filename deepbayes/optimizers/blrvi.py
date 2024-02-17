@@ -65,7 +65,7 @@ class VariationalOnlineGuassNewton(optimizer.Optimizer):
             sample = tf.math.add(self.posterior_mean[i], sample)
             init_weights.append(sample)
         
-        self.model.set_weights(np.asarray(init_weights))
+        self.model.set_weights(np.asarray(init_weights, dtype=object))
         
         with tf.GradientTape(persistent=True) as tape:
             # Get the probabilities
@@ -132,7 +132,7 @@ class VariationalOnlineGuassNewton(optimizer.Optimizer):
                     output += (1.0/self.loss_monte_carlo) * worst_case
                 loss = self.loss_func(labels, output)
         weight_gradient = tape.gradient(loss, self.model.trainable_variables)
-        g = np.asarray(weight_gradient)
+        g = np.asarray(weight_gradient, dtype=object)
        
         #if(int(self.robust_train) == 1):
 #        print(g)

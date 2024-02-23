@@ -544,7 +544,7 @@ def chernoff_bound_verification(model, inp, eps, cls, **kwargs):
     chernoff_bound = math.ceil( (1/(2*epsilon**2)) * math.log(2/delta) )
     softmax = 0
     for i in trange(chernoff_bound, desc="Sampling for Chernoff Bound Satisfaction"):
-        model.set_weights(model.sample())
+        model.model.set_weights(model.sample())
         logit_l, logit_u = IBP(model, inp, model.model.get_weights(), eps, predict=False)
         v1 = tf.one_hot(cls, depth=10)
         v2 = 1 - tf.one_hot(cls, depth=10)
@@ -588,8 +588,8 @@ def massart_bound_check(model, inp, eps, predicate, **kwargs):
     while(iterations <= halting_bound):
         if(iterations > 0 and verbose):
             print("Working on iteration: %s \t Bound: %s \t Param: %s"%(iterations, halting_bound, successes/iterations))  
-        model.set_weights(model.sample())
-        #print("PREDICTION: ", model._predict(inp))
+        model.model.set_weights(model.sample())
+        #print("PREDICTION: ", model.model.predict(inp))
         if(verify and classification):
             logit_l, logit_u = IBP(model, inp, model.model.get_weights(), eps, predict=False)
             logit_l, logit_u = logit_l.numpy(), logit_u.numpy()
@@ -622,7 +622,7 @@ def massart_bound_check(model, inp, eps, predicate, **kwargs):
         elif(not verify):
             adv = attacks.FGSM(model, inp, attack_loss, eps, samples=1) #, direction=cls)
             #print(adv-inp)
-            worst_case = model._predict(adv)
+            worst_case = model.model.predict(adv)
             #print(worst_case)
         #if(np.argmax(np.squeeze(worst_case)) != cls):
         if(not predicate(worst_case)):
@@ -645,7 +645,7 @@ def massart_bound_check(model, inp, eps, predicate, **kwargs):
         else:
             halting_bound = min(hb, chernoff_bound)
         if(chernoff_override):
-            mean += model._predict(glob_adv)
+            mean += model.model.predict(glob_adv)
     if(verbose):
         print("Exited becuase %s >= %s"%(iterations, halting_bound))
     if(not chernoff_override):

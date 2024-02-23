@@ -76,7 +76,7 @@ class Adam(optimizer.Optimizer):
                 loss = self.loss_func(labels, predictions, worst_case, self.robust_lambda)
 
         weight_gradient = tape.gradient(loss, self.model.trainable_variables)
-        g = np.asarray(weight_gradient)
+        g = np.asarray(weight_gradient, dtype=object)
         
         sq_grad = []
         for i in range(len(weight_gradient)):
@@ -129,7 +129,7 @@ class Adam(optimizer.Optimizer):
                 loss = self.loss_func(labels, predictions, worst_case, self.robust_lambda)
                 
         weight_gradient = tape.gradient(loss, self.model.trainable_variables)
-        g = np.asarray(weight_gradient)
+        g = np.asarray(weight_gradient, dtype=object)
         #print(g)
         sq_grad = []
         for i in range(len(weight_gradient)):

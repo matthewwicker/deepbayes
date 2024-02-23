@@ -74,7 +74,7 @@ class VariationalOnlineGuassNewton(optimizer.Optimizer):
             zeros_vec = tf.math.multiply(init_weights[i], 0)
             weight_gradient.append(zeros_vec)
             weight_hessian.append(zeros_vec)
-        weight_gradient = np.asarray(weight_gradient); weight_hessian = np.asarray(weight_hessian)
+        weight_gradient = np.asarray(weight_gradient, dtype=object); weight_hessian = np.asarray(weight_hessian)
         # Define the GradientTape context
         index = 0
         for feature in features:
